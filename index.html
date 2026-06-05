@@ -1026,19 +1026,42 @@ function computeCalendarDates(proj){
   var maxEF = Math.max.apply(null, proj.tasks.map(function(t){return t.ef;}));
 
   if(proj.dateMode==='end'){
-    // anchor = date of last day (EF = maxEF)
-    // real start anchor = anchor - maxEF workdays
+    // anchor = EXACT end date (even if weekend) — EF of last task = anchor
+    // We compute start by going back maxEF workdays from anchor
+    // But the last task ends EXACTLY on anchor, not on the next workday
+    // Strategy: find what date is "workday 0" such that workday maxEF = anchor
+    // i.e. realStart = anchor minus maxEF workdays, but anchor itself is the endpoint
     var realStart = addWorkdays(new Date(anchor), -maxEF);
     proj.tasks.forEach(function(t){
-      t.dateES = formatDate(pertDayToDate(realStart, t.es));
-      t.dateEF = formatDate(pertDayToDate(realStart, t.ef));
-      t.dateLS = formatDate(pertDayToDate(realStart, t.ls===Infinity?t.es:t.ls));
-      t.dateLF = formatDate(pertDayToDate(realStart, t.lf===Infinity?t.ef:t.lf));
+      // ES and EF: go forward from realStart by workdays
+      // But last task (ef=maxEF) must land exactly on anchor
+      var dateES, dateEF, dateLS, dateLF;
+      if(t.ef === maxEF){
+        // Last task ends exactly on anchor
+        dateEF = new Date(anchor);
+        dateES = addWorkdays(new Date(anchor), -(t.dur));
+      } else {
+        dateES = pertDayToDate(realStart, t.es);
+        dateEF = pertDayToDate(realStart, t.ef);
+      }
+      var ls = t.ls===Infinity?t.es:t.ls;
+      var lf = t.lf===Infinity?t.ef:t.lf;
+      if(lf === maxEF){
+        dateLF = new Date(anchor);
+        dateLS = addWorkdays(new Date(anchor), -(t.dur));
+      } else {
+        dateLS = pertDayToDate(realStart, ls);
+        dateLF = pertDayToDate(realStart, lf);
+      }
+      t.dateES = formatDate(dateES);
+      t.dateEF = formatDate(dateEF);
+      t.dateLS = formatDate(dateLS);
+      t.dateLF = formatDate(dateLF);
     });
     proj._realStart = formatDate(realStart);
     proj._realEnd   = formatDate(anchor);
   } else {
-    // anchor = start date (ES=0)
+    // anchor = exact start date (ES=0), even if weekend
     proj.tasks.forEach(function(t){
       t.dateES = formatDate(pertDayToDate(anchor, t.es));
       t.dateEF = formatDate(pertDayToDate(anchor, t.ef));
@@ -1048,6 +1071,7 @@ function computeCalendarDates(proj){
     proj._realStart = formatDate(anchor);
     proj._realEnd   = formatDate(pertDayToDate(anchor, maxEF));
   }
+  proj._anchorIsWeekend = !isWorkday(anchor);
 }
 
 function saveProject() {
@@ -1226,12 +1250,14 @@ function previewSettingsDates(){
     startDate = anchor;
     endDate = addWorkdays(new Date(anchor), maxEF);
   }
+  var isWE = !isWorkday(anchor);
   res.style.display='block';
   res.innerHTML = '📅 Début du projet : <b style="color:var(--accent)">'
     +formatDateFR(startDate)+'</b><br>'
     +'🏁 Fin du projet : <b style="color:var(--accent)">'
     +formatDateFR(endDate)+'</b><br>'
-    +'⏱ Durée : <b style="color:var(--accent)">'+maxEF+' jours ouvrés</b>';
+    +'⏱ Durée : <b style="color:var(--accent)">'+maxEF+' jours ouvrés</b>'
+    +(isWE ? '<br>⚠️ <b style="color:var(--accent2)">Cette date tombe un week-end — les durées sont calculées en jours ouvrés mais la date reste fixe.</b>' : '');
 }
 
 document.getElementById('btnSettings').addEventListener('click', function(){
