@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -352,6 +353,7 @@ svg#arrows {
       <p id="headerProjSub"></p>
     </div>
     <div class="header-actions">
+      <button class="btn sm" id="btnSettings">⚙️</button>
       <button class="btn sm" id="btnLayout">&#8859; Auto</button>
       <button class="btn sm" id="btnConnect">&#8674; Lier</button>
       <button class="btn sm primary" id="btnAdd">＋</button>
@@ -404,6 +406,29 @@ svg#arrows {
   <!-- STATS VIEW -->
   <div class="view" id="view-stats">
     <div class="stats-view" id="statsContent"></div>
+  </div>
+</div>
+
+<!-- SETTINGS MODAL -->
+<div class="modal-overlay" id="modalSettings">
+  <div class="modal">
+    <h2>⚙️ Paramètres du projet</h2>
+    <div class="field">
+      <label>Mode de planification</label>
+      <div style="display:flex;gap:8px;margin-top:4px;">
+        <button class="btn" id="sBtnModeStart" onclick="setSettingsMode('start')" style="flex:1;">📅 Date de début</button>
+        <button class="btn" id="sBtnModeEnd"   onclick="setSettingsMode('end')"   style="flex:1;">🏁 Date de fin</button>
+      </div>
+    </div>
+    <div class="field">
+      <label id="sLabelDate">DATE DE DÉBUT</label>
+      <input type="date" id="sDate"/>
+    </div>
+    <div id="sDateResult" style="background:rgba(245,166,35,0.08);border:1px solid rgba(245,166,35,0.25);border-radius:10px;padding:10px 12px;font-size:11px;color:var(--text);line-height:1.8;margin-bottom:4px;display:none;"></div>
+    <div class="modal-actions">
+      <button class="btn" id="btnSettingsCancel">Annuler</button>
+      <button class="btn primary" id="btnSettingsSave">Appliquer</button>
+    </div>
   </div>
 </div>
 
@@ -1163,6 +1188,95 @@ cw.addEventListener('touchmove',function(e){
 cw.addEventListener('touchend',function(){ panStart=null; });
 
 document.getElementById('btnBack').addEventListener('click',goBack);
+
+// ── SETTINGS MODAL ──
+var settingsMode = 'start';
+
+function setSettingsMode(mode){
+  settingsMode = mode;
+  var lbl = document.getElementById('sLabelDate');
+  var btnS = document.getElementById('sBtnModeStart');
+  var btnE = document.getElementById('sBtnModeEnd');
+  if(mode==='start'){
+    lbl.textContent = 'DATE DE DÉBUT';
+    btnS.style.borderColor='var(--accent)'; btnS.style.color='var(--accent)';
+    btnE.style.borderColor=''; btnE.style.color='';
+  } else {
+    lbl.textContent = 'DATE DE FIN SOUHAITÉE';
+    btnE.style.borderColor='var(--accent)'; btnE.style.color='var(--accent)';
+    btnS.style.borderColor=''; btnS.style.color='';
+  }
+  previewSettingsDates();
+}
+
+function previewSettingsDates(){
+  var dateVal = document.getElementById('sDate').value;
+  var res = document.getElementById('sDateResult');
+  if(!dateVal || !tasks.length){ res.style.display='none'; return; }
+  // Simulate calc
+  var tempTasks = JSON.parse(JSON.stringify(tasks));
+  calcPertOn(tempTasks);
+  var maxEF = Math.max.apply(null, tempTasks.map(function(t){return t.ef;}));
+  var anchor = parseDate(dateVal);
+  var startDate, endDate;
+  if(settingsMode==='end'){
+    endDate = anchor;
+    startDate = addWorkdays(new Date(anchor), -maxEF);
+  } else {
+    startDate = anchor;
+    endDate = addWorkdays(new Date(anchor), maxEF);
+  }
+  res.style.display='block';
+  res.innerHTML = '📅 Début du projet : <b style="color:var(--accent)">'
+    +formatDateFR(startDate)+'</b><br>'
+    +'🏁 Fin du projet : <b style="color:var(--accent)">'
+    +formatDateFR(endDate)+'</b><br>'
+    +'⏱ Durée : <b style="color:var(--accent)">'+maxEF+' jours ouvrés</b>';
+}
+
+document.getElementById('btnSettings').addEventListener('click', function(){
+  var p = currentProj(); if(!p) return;
+  settingsMode = p.dateMode||'start';
+  setSettingsMode(settingsMode);
+  document.getElementById('sDate').value = p.dateAnchor||'';
+  previewSettingsDates();
+  document.getElementById('modalSettings').classList.add('open');
+});
+
+document.getElementById('sDate').addEventListener('change', previewSettingsDates);
+
+document.getElementById('btnSettingsSave').addEventListener('click', function(){
+  var dateVal = document.getElementById('sDate').value;
+  var p = currentProj(); if(!p) return;
+  p.dateMode   = settingsMode;
+  p.dateAnchor = dateVal;
+  if(dateVal && p.tasks&&p.tasks.length){
+    computeCalendarDates(p);
+    tasks = JSON.parse(JSON.stringify(p.tasks||[]));
+    // Update subtitle
+    var sub = p.desc||'';
+    if(p._realStart&&p._realEnd) sub+=(sub?' · ':'')+formatDateFR(parseDate(p._realStart))+' → '+formatDateFR(parseDate(p._realEnd));
+    document.getElementById('headerProjSub').textContent = sub;
+  } else {
+    // Clear calendar dates if no anchor
+    p.tasks.forEach(function(t){ delete t.dateES; delete t.dateEF; delete t.dateLS; delete t.dateLF; });
+    tasks = JSON.parse(JSON.stringify(p.tasks||[]));
+    document.getElementById('headerProjSub').textContent = p.desc||'';
+  }
+  p.updatedAt = Date.now();
+  saveData();
+  document.getElementById('modalSettings').classList.remove('open');
+  if(document.getElementById('view-graph').classList.contains('active')) renderGraph();
+  if(document.getElementById('view-tasks').classList.contains('active')) renderTaskList();
+  if(document.getElementById('view-stats').classList.contains('active')) renderStats();
+});
+
+document.getElementById('btnSettingsCancel').addEventListener('click', function(){
+  document.getElementById('modalSettings').classList.remove('open');
+});
+document.getElementById('modalSettings').addEventListener('click', function(e){
+  if(e.target===this) this.classList.remove('open');
+});
 document.getElementById('btnAdd').addEventListener('click',openAddTask);
 document.getElementById('btnLayout').addEventListener('click',function(){ autoLayout(); saveTasks(); renderGraph(); });
 document.getElementById('btnConnect').addEventListener('click',function(){
