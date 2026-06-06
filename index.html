@@ -415,6 +415,16 @@ svg#arrows {
     <h2>⚙️ Paramètres du projet</h2>
 
     <div class="field">
+      <label>Unité de temps</label>
+      <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">
+        <button class="btn" id="sBtnUnitMin"  onclick="setSettingsUnit('min')"  style="flex:1;">⏱ Minutes</button>
+        <button class="btn" id="sBtnUnitHour" onclick="setSettingsUnit('hour')" style="flex:1;">🕐 Heures</button>
+        <button class="btn" id="sBtnUnitDay"  onclick="setSettingsUnit('day')"  style="flex:1;">📅 Jours</button>
+      </div>
+      <div id="sUnitDesc" style="font-size:10px;color:var(--muted);margin-top:6px;"></div>
+    </div>
+
+    <div class="field" id="sCalField">
       <label>Calendrier</label>
       <div style="display:flex;gap:8px;margin-top:4px;">
         <button class="btn" id="sBtnCalAll"  onclick="setSettingsCal('all')"  style="flex:1;">📆 Tous les jours</button>
@@ -431,8 +441,9 @@ svg#arrows {
       </div>
     </div>
 
-    <div class="field">
-      <label id="sLabelDate">DATE DE DÉBUT</label>
+    <div class="field" id="sAnchorField">
+      <label id="sLabelDate">HEURE DE DÉBUT</label>
+      <input type="time" id="sTime" style="display:none;"/>
       <input type="date" id="sDate"/>
     </div>
 
@@ -450,7 +461,7 @@ svg#arrows {
   <div class="modal">
     <h2 id="modalTaskTitle">Nouvelle t&acirc;che</h2>
     <div class="field"><label>NOM</label><input type="text" id="fName" placeholder="ex: Conception"></div>
-    <div class="field"><label>DUR&Eacute;E (jours)</label><input type="number" id="fDur" placeholder="5" min="0" step="0.5"></div>
+    <div class="field"><label id="fDurLabel">DURÉE (jours)</label><input type="number" id="fDur" placeholder="5" min="0" step="1"></div>
     <div class="field"><label>PR&Eacute;D&Eacute;CESSEURS</label><div class="multi-check" id="fPreds"></div></div>
     <div class="modal-actions">
       <button class="btn" id="btnTaskCancel">Annuler</button>
@@ -1093,6 +1104,36 @@ function computeCalendarDates(proj){
   proj._anchorIsWeekend = !isWorkday(anchor);
 }
 
+// Compute time-based dates (minutes or hours)
+function computeTimeDates(proj){
+  var anchor = proj.dateAnchor; // HH:MM string
+  if(!anchor || !proj.tasks||!proj.tasks.length) return;
+  var unit = proj.unit||'day';
+  calcPertOn(proj.tasks);
+  var maxEF = Math.max.apply(null, proj.tasks.map(function(t){return t.ef;}));
+  var anchorMins = timeToMinutes(anchor);
+  // Convert EF units to minutes
+  var toMins = unit==='min' ? 1 : 60;
+  var startMins, endMins;
+  if(proj.dateMode==='end'){
+    endMins   = anchorMins;
+    startMins = anchorMins - maxEF*toMins;
+  } else {
+    startMins = anchorMins;
+    endMins   = anchorMins + maxEF*toMins;
+  }
+  proj.tasks.forEach(function(t){
+    var ls = t.ls===Infinity?t.es:t.ls;
+    var lf = t.lf===Infinity?t.ef:t.lf;
+    t.dateES = minutesToHHMM(startMins + t.es*toMins);
+    t.dateEF = minutesToHHMM(startMins + t.ef*toMins);
+    t.dateLS = minutesToHHMM(startMins + ls*toMins);
+    t.dateLF = minutesToHHMM(startMins + lf*toMins);
+  });
+  proj._realStart = minutesToHHMM(startMins);
+  proj._realEnd   = minutesToHHMM(endMins);
+}
+
 function saveProject() {
   var name=document.getElementById('fProjName').value.trim();
   if (!name){ document.getElementById('fProjName').focus(); return; }
@@ -1123,7 +1164,11 @@ function openProject(id) {
   var p=currentProj();
   if (!p) return;
   calMode = p.calMode||'all';
-  if(p.dateAnchor && p.tasks&&p.tasks.length) computeCalendarDates(p);
+  var pUnit = p.unit||'day';
+  if(p.dateAnchor && p.tasks&&p.tasks.length){
+    if(pUnit==='min'||pUnit==='hour') computeTimeDates(p);
+    else computeCalendarDates(p);
+  }
   tasks=JSON.parse(JSON.stringify(p.tasks||[]));
   document.getElementById('headerProjName').textContent=p.name;
   var sub=p.desc||'';
@@ -1197,9 +1242,14 @@ function saveTask() {
     tasks.push({id:genId(),name:name,dur:dur,preds:preds,x:20,y:20});
   }
   autoLayout(); saveTasks();
-  // Recompute calendar dates
+  // Recompute dates
   var cp=currentProj();
-  if(cp && cp.dateAnchor) { computeCalendarDates(cp); tasks=JSON.parse(JSON.stringify(cp.tasks||[])); }
+  if(cp && cp.dateAnchor){
+    var cpUnit=cp.unit||'day';
+    if(cpUnit==='min'||cpUnit==='hour') computeTimeDates(cp);
+    else computeCalendarDates(cp);
+    tasks=JSON.parse(JSON.stringify(cp.tasks||[]));
+  }
   document.getElementById('modalTask').classList.remove('open');
   renderGraph();
   if (document.getElementById('view-tasks').classList.contains('active')) renderTaskList();
@@ -1236,6 +1286,49 @@ document.getElementById('btnBack').addEventListener('click',goBack);
 // ── SETTINGS MODAL ──
 var settingsMode = 'start';
 var settingsCal  = 'all';
+var settingsUnit = 'day'; // 'min', 'hour', 'day'
+
+function unitLabel(){ return settingsUnit==='min'?'min':settingsUnit==='hour'?'h':'j'; }
+function unitFull(){ return settingsUnit==='min'?'minutes':settingsUnit==='hour'?'heures':'jours'; }
+
+function setSettingsUnit(unit){
+  settingsUnit = unit;
+  var btnMin  = document.getElementById('sBtnUnitMin');
+  var btnHour = document.getElementById('sBtnUnitHour');
+  var btnDay  = document.getElementById('sBtnUnitDay');
+  var desc    = document.getElementById('sUnitDesc');
+  var calField= document.getElementById('sCalField');
+  var sDate   = document.getElementById('sDate');
+  var sTime   = document.getElementById('sTime');
+  // Reset all
+  [btnMin,btnHour,btnDay].forEach(function(b){ b.style.borderColor=''; b.style.color=''; });
+  if(unit==='min'){
+    btnMin.style.borderColor='var(--accent)'; btnMin.style.color='var(--accent)';
+    desc.textContent='⏱ Durées en minutes. Ancre = heure de début ou de fin (ex: 18:00).';
+    calField.style.display='none';
+    sDate.style.display='none'; sTime.style.display='block';
+    document.getElementById('sLabelDate').textContent = settingsMode==='end'?'HEURE DE FIN SOUHAITÉE':'HEURE DE DÉBUT';
+    document.getElementById('fDurLabel').textContent = 'DURÉE (minutes)';
+    document.getElementById('fDur').placeholder='30';
+  } else if(unit==='hour'){
+    btnHour.style.borderColor='var(--accent)'; btnHour.style.color='var(--accent)';
+    desc.textContent='🕐 Durées en heures. Ancre = heure de début ou de fin (ex: 08:00).';
+    calField.style.display='none';
+    sDate.style.display='none'; sTime.style.display='block';
+    document.getElementById('sLabelDate').textContent = settingsMode==='end'?'HEURE DE FIN SOUHAITÉE':'HEURE DE DÉBUT';
+    document.getElementById('fDurLabel').textContent = 'DURÉE (heures)';
+    document.getElementById('fDur').placeholder='2';
+  } else {
+    btnDay.style.borderColor='var(--accent)'; btnDay.style.color='var(--accent)';
+    desc.textContent='📅 Durées en jours. Ancre = date de début ou de fin.';
+    calField.style.display='block';
+    sDate.style.display='block'; sTime.style.display='none';
+    document.getElementById('sLabelDate').textContent = settingsMode==='end'?'DATE DE FIN SOUHAITÉE':'DATE DE DÉBUT';
+    document.getElementById('fDurLabel').textContent = 'DURÉE (jours)';
+    document.getElementById('fDur').placeholder='5';
+  }
+  previewSettingsDates();
+}
 
 function setSettingsCal(mode){
   settingsCal = mode;
@@ -1260,77 +1353,107 @@ function setSettingsMode(mode){
   var lbl = document.getElementById('sLabelDate');
   var btnS = document.getElementById('sBtnModeStart');
   var btnE = document.getElementById('sBtnModeEnd');
+  var isTime = (settingsUnit==='min'||settingsUnit==='hour');
   if(mode==='start'){
-    lbl.textContent = 'DATE DE DÉBUT';
+    lbl.textContent = isTime?'HEURE DE DÉBUT':'DATE DE DÉBUT';
     btnS.style.borderColor='var(--accent)'; btnS.style.color='var(--accent)';
     btnE.style.borderColor=''; btnE.style.color='';
   } else {
-    lbl.textContent = 'DATE DE FIN SOUHAITÉE';
+    lbl.textContent = isTime?'HEURE DE FIN SOUHAITÉE':'DATE DE FIN SOUHAITÉE';
     btnE.style.borderColor='var(--accent)'; btnE.style.color='var(--accent)';
     btnS.style.borderColor=''; btnS.style.color='';
   }
   previewSettingsDates();
 }
 
+function timeToMinutes(hhmm){
+  var p=hhmm.split(':'); return parseInt(p[0])*60+parseInt(p[1]);
+}
+function minutesToHHMM(mins){
+  var h=Math.floor(mins/60), m=mins%60;
+  return (h<10?'0':'')+h+':'+(m<10?'0':'')+m;
+}
+
 function previewSettingsDates(){
-  var dateVal = document.getElementById('sDate').value;
   var res = document.getElementById('sDateResult');
-  if(!dateVal || !tasks.length){ res.style.display='none'; return; }
-  // Simulate calc
+  var isTime = (settingsUnit==='min'||settingsUnit==='hour');
+  var anchorVal = isTime ? document.getElementById('sTime').value : document.getElementById('sDate').value;
+  if(!anchorVal || !tasks.length){ res.style.display='none'; return; }
+
   var tempTasks = JSON.parse(JSON.stringify(tasks));
   calcPertOn(tempTasks);
   var maxEF = Math.max.apply(null, tempTasks.map(function(t){return t.ef;}));
-  var anchor = parseDate(dateVal);
-  var startDate, endDate;
-  if(settingsMode==='end'){
-    endDate = anchor;
-    startDate = addWorkdays(new Date(anchor), -maxEF);
+
+  if(isTime){
+    // Work in minutes
+    var anchorMins = timeToMinutes(anchorVal);
+    var totalMins = settingsUnit==='min' ? maxEF : maxEF*60;
+    var startMins, endMins;
+    if(settingsMode==='end'){ endMins=anchorMins; startMins=anchorMins-totalMins; }
+    else { startMins=anchorMins; endMins=anchorMins+totalMins; }
+    res.style.display='block';
+    res.innerHTML = '🕐 Début : <b style="color:var(--accent)">'+minutesToHHMM(startMins)+'</b><br>'
+      +'🏁 Fin : <b style="color:var(--accent)">'+minutesToHHMM(endMins)+'</b><br>'
+      +'⏱ Durée totale : <b style="color:var(--accent)">'+totalMins+' min ('+(totalMins/60).toFixed(1)+'h)</b>';
   } else {
-    startDate = anchor;
-    endDate = addWorkdays(new Date(anchor), maxEF);
+    var anchor = parseDate(anchorVal);
+    var startDate, endDate;
+    if(settingsMode==='end'){ endDate=anchor; startDate=addWorkdays(new Date(anchor),-maxEF); }
+    else { startDate=anchor; endDate=addWorkdays(new Date(anchor),maxEF); }
+    var isWE = !isWorkday(anchor);
+    var calLabel = (settingsCal==='all') ? 'jours calendaires' : 'jours ouvrés';
+    res.style.display='block';
+    res.innerHTML = '📅 Début : <b style="color:var(--accent)">'+formatDateFR(startDate)+'</b><br>'
+      +'🏁 Fin : <b style="color:var(--accent)">'+formatDateFR(endDate)+'</b><br>'
+      +'⏱ Durée : <b style="color:var(--accent)">'+maxEF+' '+calLabel+'</b>'
+      +(isWE && settingsCal==='work' ? '<br>⚠️ <b style="color:var(--accent2)">Week-end — durées en jours ouvrés, date fixe.</b>' : '')
+      +(isWE && settingsCal==='all'  ? '<br>ℹ️ Week-end pris en compte normalement.' : '');
   }
-  var isWE = !isWorkday(anchor);
-  var calLabel = (settingsCal==='all') ? 'jours calendaires' : 'jours ouvrés';
-  res.style.display='block';
-  res.innerHTML = '📅 Début du projet : <b style="color:var(--accent)">'
-    +formatDateFR(startDate)+'</b><br>'
-    +'🏁 Fin du projet : <b style="color:var(--accent)">'
-    +formatDateFR(endDate)+'</b><br>'
-    +'⏱ Durée : <b style="color:var(--accent)">'+maxEF+' '+calLabel+'</b>'
-    +(isWE && settingsCal==='work' ? '<br>⚠️ <b style="color:var(--accent2)">Cette date tombe un week-end — les durées sont en jours ouvrés mais la date reste fixe.</b>' : '')
-    +(isWE && settingsCal==='all'  ? '<br>ℹ️ Cette date tombe un week-end — c’est pris en compte normalement.' : '');
 }
 
 document.getElementById('btnSettings').addEventListener('click', function(){
   var p = currentProj(); if(!p) return;
   settingsMode = p.dateMode||'start';
   settingsCal  = p.calMode||'all';
+  settingsUnit = p.unit||'day';
   calMode      = settingsCal;
+  setSettingsUnit(settingsUnit);
   setSettingsMode(settingsMode);
   setSettingsCal(settingsCal);
-  document.getElementById('sDate').value = p.dateAnchor||'';
+  var isTime = (settingsUnit==='min'||settingsUnit==='hour');
+  if(isTime){
+    document.getElementById('sTime').value = p.dateAnchor||'';
+  } else {
+    document.getElementById('sDate').value = p.dateAnchor||'';
+  }
   previewSettingsDates();
   document.getElementById('modalSettings').classList.add('open');
 });
 
+document.getElementById('sTime').addEventListener('change', previewSettingsDates);
+
 document.getElementById('sDate').addEventListener('change', previewSettingsDates);
 
 document.getElementById('btnSettingsSave').addEventListener('click', function(){
-  var dateVal = document.getElementById('sDate').value;
+  var isTime = (settingsUnit==='min'||settingsUnit==='hour');
+  var anchorVal = isTime ? document.getElementById('sTime').value : document.getElementById('sDate').value;
   var p = currentProj(); if(!p) return;
   p.dateMode   = settingsMode;
-  p.dateAnchor = dateVal;
+  p.dateAnchor = anchorVal;
   p.calMode    = settingsCal;
+  p.unit       = settingsUnit;
   calMode      = settingsCal;
-  if(dateVal && p.tasks&&p.tasks.length){
-    computeCalendarDates(p);
+  if(anchorVal && p.tasks&&p.tasks.length){
+    if(isTime){
+      computeTimeDates(p);
+    } else {
+      computeCalendarDates(p);
+    }
     tasks = JSON.parse(JSON.stringify(p.tasks||[]));
-    // Update subtitle
     var sub = p.desc||'';
-    if(p._realStart&&p._realEnd) sub+=(sub?' · ':'')+formatDateFR(parseDate(p._realStart))+' → '+formatDateFR(parseDate(p._realEnd));
+    if(p._realStart&&p._realEnd) sub+=(sub?' · ':'')+p._realStart+' → '+p._realEnd;
     document.getElementById('headerProjSub').textContent = sub;
   } else {
-    // Clear calendar dates if no anchor
     p.tasks.forEach(function(t){ delete t.dateES; delete t.dateEF; delete t.dateLS; delete t.dateLF; });
     tasks = JSON.parse(JSON.stringify(p.tasks||[]));
     document.getElementById('headerProjSub').textContent = p.desc||'';
@@ -1393,7 +1516,7 @@ document.querySelectorAll('.tab').forEach(function(tab){
 if (!appData.projects.length) {
   var demo = {
     id:'PDEMO', name:'Anniversaire surprise', desc:'Fête du 13 juin',
-    dateMode:'end', dateAnchor:'2026-06-13', calMode:'all',
+    dateMode:'end', dateAnchor:'2026-06-13', calMode:'all', unit:'day',
     createdAt:Date.now(), updatedAt:Date.now(),
     tasks:[
       {id:'A',name:'Choisir la date',       dur:1,preds:[],x:20,y:120},
