@@ -413,6 +413,16 @@ svg#arrows {
 <div class="modal-overlay" id="modalSettings">
   <div class="modal">
     <h2>⚙️ Paramètres du projet</h2>
+
+    <div class="field">
+      <label>Calendrier</label>
+      <div style="display:flex;gap:8px;margin-top:4px;">
+        <button class="btn" id="sBtnCalAll"  onclick="setSettingsCal('all')"  style="flex:1;">📆 Tous les jours</button>
+        <button class="btn" id="sBtnCalWork" onclick="setSettingsCal('work')" style="flex:1;">💼 Jours ouvrés</button>
+      </div>
+      <div id="sCalDesc" style="font-size:10px;color:var(--muted);margin-top:6px;"></div>
+    </div>
+
     <div class="field">
       <label>Mode de planification</label>
       <div style="display:flex;gap:8px;margin-top:4px;">
@@ -420,11 +430,14 @@ svg#arrows {
         <button class="btn" id="sBtnModeEnd"   onclick="setSettingsMode('end')"   style="flex:1;">🏁 Date de fin</button>
       </div>
     </div>
+
     <div class="field">
       <label id="sLabelDate">DATE DE DÉBUT</label>
       <input type="date" id="sDate"/>
     </div>
+
     <div id="sDateResult" style="background:rgba(245,166,35,0.08);border:1px solid rgba(245,166,35,0.25);border-radius:10px;padding:10px 12px;font-size:11px;color:var(--text);line-height:1.8;margin-bottom:4px;display:none;"></div>
+
     <div class="modal-actions">
       <button class="btn" id="btnSettingsCancel">Annuler</button>
       <button class="btn primary" id="btnSettingsSave">Appliquer</button>
@@ -997,14 +1010,20 @@ function formatDateFR(d){
 }
 function isWorkday(d){ var w=d.getDay(); return w>=1&&w<=5; }
 
-// Add n working days to date d
+// Current project calendar mode: 'all' or 'work'
+var calMode = 'all';
+
+// Add n days to date d — respects calMode
 function addWorkdays(d, n){
+  if(calMode==='all'){
+    var r=new Date(d); r.setDate(r.getDate()+n); return r;
+  }
   var r=new Date(d); var step=n>=0?1:-1; var remaining=Math.abs(n);
   while(remaining>0){ r.setDate(r.getDate()+step); if(isWorkday(r)) remaining--; }
   return r;
 }
 
-// Convert PERT day index to real date (working days from anchor)
+// Convert PERT day index to real date from anchor
 function pertDayToDate(anchor, pertDay){
   if(pertDay===0) return new Date(anchor);
   return addWorkdays(new Date(anchor), pertDay);
@@ -1103,6 +1122,7 @@ function openProject(id) {
   currentProjId=id;
   var p=currentProj();
   if (!p) return;
+  calMode = p.calMode||'all';
   if(p.dateAnchor && p.tasks&&p.tasks.length) computeCalendarDates(p);
   tasks=JSON.parse(JSON.stringify(p.tasks||[]));
   document.getElementById('headerProjName').textContent=p.name;
@@ -1215,6 +1235,25 @@ document.getElementById('btnBack').addEventListener('click',goBack);
 
 // ── SETTINGS MODAL ──
 var settingsMode = 'start';
+var settingsCal  = 'all';
+
+function setSettingsCal(mode){
+  settingsCal = mode;
+  calMode = mode;
+  var btnA = document.getElementById('sBtnCalAll');
+  var btnW = document.getElementById('sBtnCalWork');
+  var desc = document.getElementById('sCalDesc');
+  if(mode==='all'){
+    btnA.style.borderColor='var(--accent)'; btnA.style.color='var(--accent)';
+    btnW.style.borderColor=''; btnW.style.color='';
+    desc.textContent='📆 Tous les jours comptent, week-end inclus. Idéal pour les projets personnels.';
+  } else {
+    btnW.style.borderColor='var(--accent)'; btnW.style.color='var(--accent)';
+    btnA.style.borderColor=''; btnA.style.color='';
+    desc.textContent='💼 Seuls les jours lundi→vendredi comptent. Idéal pour les projets professionnels.';
+  }
+  previewSettingsDates();
+}
 
 function setSettingsMode(mode){
   settingsMode = mode;
@@ -1251,19 +1290,24 @@ function previewSettingsDates(){
     endDate = addWorkdays(new Date(anchor), maxEF);
   }
   var isWE = !isWorkday(anchor);
+  var calLabel = (settingsCal==='all') ? 'jours calendaires' : 'jours ouvrés';
   res.style.display='block';
   res.innerHTML = '📅 Début du projet : <b style="color:var(--accent)">'
     +formatDateFR(startDate)+'</b><br>'
     +'🏁 Fin du projet : <b style="color:var(--accent)">'
     +formatDateFR(endDate)+'</b><br>'
-    +'⏱ Durée : <b style="color:var(--accent)">'+maxEF+' jours ouvrés</b>'
-    +(isWE ? '<br>⚠️ <b style="color:var(--accent2)">Cette date tombe un week-end — les durées sont calculées en jours ouvrés mais la date reste fixe.</b>' : '');
+    +'⏱ Durée : <b style="color:var(--accent)">'+maxEF+' '+calLabel+'</b>'
+    +(isWE && settingsCal==='work' ? '<br>⚠️ <b style="color:var(--accent2)">Cette date tombe un week-end — les durées sont en jours ouvrés mais la date reste fixe.</b>' : '')
+    +(isWE && settingsCal==='all'  ? '<br>ℹ️ Cette date tombe un week-end — c'est pris en compte normalement.' : '');
 }
 
 document.getElementById('btnSettings').addEventListener('click', function(){
   var p = currentProj(); if(!p) return;
   settingsMode = p.dateMode||'start';
+  settingsCal  = p.calMode||'all';
+  calMode      = settingsCal;
   setSettingsMode(settingsMode);
+  setSettingsCal(settingsCal);
   document.getElementById('sDate').value = p.dateAnchor||'';
   previewSettingsDates();
   document.getElementById('modalSettings').classList.add('open');
@@ -1276,6 +1320,8 @@ document.getElementById('btnSettingsSave').addEventListener('click', function(){
   var p = currentProj(); if(!p) return;
   p.dateMode   = settingsMode;
   p.dateAnchor = dateVal;
+  p.calMode    = settingsCal;
+  calMode      = settingsCal;
   if(dateVal && p.tasks&&p.tasks.length){
     computeCalendarDates(p);
     tasks = JSON.parse(JSON.stringify(p.tasks||[]));
@@ -1347,7 +1393,7 @@ document.querySelectorAll('.tab').forEach(function(tab){
 if (!appData.projects.length) {
   var demo = {
     id:'PDEMO', name:'Anniversaire surprise', desc:'Fête du 13 juin',
-    dateMode:'end', dateAnchor:'2026-06-13',
+    dateMode:'end', dateAnchor:'2026-06-13', calMode:'all',
     createdAt:Date.now(), updatedAt:Date.now(),
     tasks:[
       {id:'A',name:'Choisir la date',       dur:1,preds:[],x:20,y:120},
