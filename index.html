@@ -1298,7 +1298,7 @@ function previewSettingsDates(){
     +formatDateFR(endDate)+'</b><br>'
     +'⏱ Durée : <b style="color:var(--accent)">'+maxEF+' '+calLabel+'</b>'
     +(isWE && settingsCal==='work' ? '<br>⚠️ <b style="color:var(--accent2)">Cette date tombe un week-end — les durées sont en jours ouvrés mais la date reste fixe.</b>' : '')
-    +(isWE && settingsCal==='all'  ? '<br>ℹ️ Cette date tombe un week-end — c'est pris en compte normalement.' : '');
+    +(isWE && settingsCal==='all'  ? '<br>ℹ️ Cette date tombe un week-end — c’est pris en compte normalement.' : '');
 }
 
 document.getElementById('btnSettings').addEventListener('click', function(){
